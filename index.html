@@ -864,22 +864,65 @@ async function getDb(){try{
   if(window.claude){const db=await window.claude.use('db');return db||null}
   if(window.firebase&&window.FIREBASE_CONFIG&&!/COLA_AQUI/.test(JSON.stringify(window.FIREBASE_CONFIG))){if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);return firebase.firestore()}
 }catch(e){}return null}
+let cloudOn=false,SUBS=[],CLOUD_ROLE='';
+async function getDb(){try{
+  if(window.claude){const db=await window.claude.use('db');return db||null}
+  if(window.firebase&&window.FIREBASE_CONFIG&&!/COLA_AQUI/.test(JSON.stringify(window.FIREBASE_CONFIG))){if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);return firebase.firestore()}
+}catch(e){}return null}
+
 async function initCloud(){
   if(!ROLE||CLOUD_ROLE===ROLE)return;
-  CLOUD_ROLE=ROLE;try{if(SUBS)SUBS()}catch(e){}SUBS=null;CLOUD=null;cloudOn=false;
+  CLOUD_ROLE=ROLE;
+  try{if(Array.isArray(SUBS))SUBS.forEach(u=>u&&u());else if(SUBS)SUBS()}catch(e){}
+  SUBS=[];CLOUD=null;cloudOn=false;
   const db=await getDb();if(!db||CLOUD_ROLE!==ROLE)return;
-  const ref=db.doc('poupar/'+ROLE);let r=null,ok=false;
-  try{const s=await ref.get();ok=true;if(s.exists&&s.data().json)r=JSON.parse(s.data().json)}catch(e){}
-  if(!ok||CLOUD_ROLE!==ROLE){tvErr=true;if(ROLE==='tv')render();return}
-  CLOUD=ref;ME=ROLE;SH=db.collection('poupar');cloudOn=true;tvErr=false;
-  try{SUBS=SH.onSnapshot(q=>{const old=PEERS;PEERS={};q.docs.forEach(d=>{if(d.exists&&(d.id==='nuno'||d.id==='anelise'))PEERS[d.id]=(d.data()||{}).sum||{}});
-    if(ROLE&&ROLE!=='tv')PEERS[ROLE]=mySummary();syncLocalPeers();
-    if(ROLE==='tv')['nuno','anelise'].forEach(i=>{const a=((old[i]||{}).recent||[])[0],b=((PEERS[i]||{}).recent||[])[0];if(a&&b&&b.id!==a.id){tvHi=i;tvNote=who(i)+' registou '+eur(b.a)+' · '+(CATS[b.c]||CATS[5])[1];clearTimeout(tvT);tvT=setTimeout(()=>{tvNote='';tvHi='';render()},10000)}});
-    tvErr=false;if(tab==='casal'||ROLE==='tv')render()},()=>{tvErr=true;if(ROLE==='tv')render()})}catch(e){}
-  if(r&&(r.savedAt||0)>(S.savedAt||0)&&ROLE!=='tv'){Object.assign(S,r);GS.set(K,JSON.stringify(S));if(S.theme)document.documentElement.dataset.theme=S.theme}
+  const ref=db.doc('poupar/'+ROLE);
+  CLOUD=ref;ME=ROLE;SH=db.collection('poupar');
+
+  // Escuta individualmente os documentos permitidos pelas regras do Firebase ('nuno' e 'anelise')
+  ['nuno','anelise'].forEach(id=>{
+    const u=db.doc('poupar/'+id).onSnapshot(d=>{
+      cloudOn=true;tvErr=false;
+      const old=(PEERS[id]&&PEERS[id].recent)?PEERS[id].recent[0]:null;
+      if(d.exists){
+        const data=d.data()||{};
+        if(data.sum)PEERS[id]=data.sum;
+        // Se este aparelho estiver com o perfil da própria pessoa, atualiza também os gastos em tempo real
+        if(id===ROLE&&ROLE!=='tv'&&data.json&&!cloudDirty){
+          try{
+            const r=JSON.parse(data.json);
+            if((r.savedAt||0)>(S.savedAt||0)){
+              Object.assign(S,r);
+              GS.set(K,JSON.stringify(S));
+              if(S.theme)document.documentElement.dataset.theme=S.theme;
+              render();
+            }
+          }catch(e){}
+        }
+      }
+      if(ROLE&&ROLE!=='tv')PEERS[ROLE]=mySummary();
+      syncLocalPeers();
+      if(ROLE==='tv'){
+        const b=((PEERS[id]||{}).recent||[])[0];
+        if(old&&b&&b.id!==old.id){
+          tvHi=id;
+          tvNote=who(id)+' registou '+eur(b.a)+' · '+(CATS[b.c]||CATS[5])[1];
+          clearTimeout(tvT);
+          tvT=setTimeout(()=>{tvNote='';tvHi='';render()},10000);
+        }
+      }
+      if(tab==='casal'||ROLE==='tv')render();
+      if(!cloudDirty)pill('☁️ Ligado','#0f9d6b');
+    },err=>{
+      console.error('Erro Firebase:',err);
+      tvErr=true;if(ROLE==='tv')render();
+    });
+    SUBS.push(u);
+  });
+
   if(ROLE!=='tv'&&(S.ob||S.ex.length)){S.savedAt=S.savedAt||Date.now();cloudSave()}
   syncState='cloud';render();
-  if(!cloudDirty)pill('☁️ Ligado','#0f9d6b');
+}
 }
 
 /* ---------- utils ---------- */
