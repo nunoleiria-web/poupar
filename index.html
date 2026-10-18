@@ -724,6 +724,7 @@ nav button{min-width:0}
 /* ====== COLA AQUI A CONFIGURAÇÃO DO TEU FIREBASE (ver LEIA-ME) ====== */
 window.FIREBASE_CONFIG={apiKey:"AIzaSyBYISsx9aZcWG8bgoJc1vPuRSqiYSPxHTQ",authDomain:"poupar-84893.firebaseapp.com",projectId:"poupar-84893",appId:"1:85958229396:web:a622c32dc8e188af022381"};
 </script>
+<base target="_blank">
 </head>
 <body>
 <div id="splash" onclick="this.remove()">
@@ -779,7 +780,7 @@ let ROLE=(()=>{
 
 let K='poupar-v5-'+(ROLE||'x');
 function emptyState(){
-  return{inc:0,goal:0,fixed:[],ex:[],goals:[],ob:0,theme:'',catB:{},hist:{},notif:true,quickAmt:'',onboarded:false};
+  return{inc:0,goal:0,fixed:[],ex:[],goals:[],ob:0,theme:'',catB:{},hist:{},notif:true,quickAmt:'',onboarded:false,tomb:[]};
 }
 let S=emptyState(),tab='hoje',mo=0,step=1,editId=null,selCat=0,selDate='',view='week';
 
@@ -804,7 +805,7 @@ function loadProfileState(){
 loadProfileState();
 
 /* Sincroniza PEERS localmente para Casal e Modo TV funcionarem no Google Sites */
-let SH=null,SHDOC=null,ME=null,USR=null,PEERS={},NAMES={},shT=null,shErr=false;
+let PEERS={};
 let CLOUD=null,cloudT=null,cloudBusy=false,cloudDirty=false,syncState='local';
 
 function syncLocalPeers(){
@@ -830,7 +831,6 @@ const save=()=>{
     GS.set(K,JSON.stringify(S));
   }
   cloudSave();
-  shareSave();
 };
 
 function pill(t,c){let p=document.getElementById('cloudst');if(!p){p=document.createElement('div');p.id='cloudst';p.style.cssText='position:fixed;top:calc(env(safe-area-inset-top,0px) + 6px);right:10px;z-index:9;font:600 11px system-ui,sans-serif;padding:4px 9px;border-radius:99px;color:#fff;pointer-events:none;opacity:.93';document.body.appendChild(p)}p.textContent=t;p.style.background=c}
@@ -876,7 +876,6 @@ async function initCloud(){
     CLOUD=db.doc('poupar/'+ROLE);
     ME=ROLE;
   }
-  SH=db.collection('poupar');
 
   // Escuta individualmente os documentos permitidos pelas regras do Firebase ('nuno' e 'anelise')
   ['nuno','anelise'].forEach(id=>{
@@ -899,9 +898,10 @@ async function initCloud(){
         // Se este aparelho estiver com o perfil da própria pessoa, atualiza também os gastos em tempo real
         if(id===ROLE&&ROLE!=='tv'&&remoteState&&!cloudDirty){
           if((remoteState.savedAt||0)>(S.savedAt||0)){
-            Object.assign(S,remoteState);
+            const changed=mergeRemoteState(remoteState);
             GS.set(K,JSON.stringify(S));
             if(S.theme)document.documentElement.dataset.theme=S.theme;
+            if(changed)cloudSave();
           }
         }
       }
@@ -983,7 +983,7 @@ function add(ci){
   const i=$('amt'),a=pn(i.value);if(a<=0){i.focus();toast('Escreve primeiro o valor');return}
   const t=selDate||todayISO();
   if(t>todayISO()){toast('Não podes registar gastos no futuro');return}
-  const e={id:Date.now(),a,c:ci,t:t};S.ex.push(e);S.quickAmt='';selDate='';save();render();
+  const e={id:Date.now()*1000+Math.floor(Math.random()*1000),a,c:ci,t:t};S.ex.push(e);S.quickAmt='';selDate='';save();render();
   const dLabel=t===todayISO()?'hoje':t.split('-').reverse().join('/');
   toast(eur(a)+' em '+CATS[ci][1]+' ('+dLabel+')',()=>{S.ex=S.ex.filter(x=>x.id!==e.id);save();render()});
 }
@@ -1006,18 +1006,18 @@ function saveEdit(){
   if(!t||t>todayISO()){toast('Data inválida');return}
   Object.assign(e,{a,t,c:ci});save();$('dlg').close();render();toast('Gasto atualizado');
 }
-function del(id){const e=S.ex.find(x=>x.id==id);S.ex=S.ex.filter(x=>x.id!=id);save();render();toast('Gasto apagado',()=>{S.ex.push(e);save();render()})}
+function del(id){const e=S.ex.find(x=>x.id==id);if(e)S.tomb=[...(S.tomb||[]),e.id].slice(-1000);S.ex=S.ex.filter(x=>x.id!=id);save();render();toast('Gasto apagado',()=>{S.ex.push(e);S.tomb=(S.tomb||[]).filter(t=>t!=e.id);save();render()})}
 
 /* ---------- ações: plano ---------- */
 function setP(k,v){S[k]=pn(v);save();render()}
 function addFixed(){const n=$('fn').value.trim(),a=pn($('fa').value);if(!n||a<=0){toast('Preenche o nome e o valor');return}S.fixed.push({id:Date.now(),n,a});save();render()}
-function delFixed(id){S.fixed=S.fixed.filter(f=>f.id!=id);save();render()}
+function delFixed(id){const f=S.fixed.find(x=>x.id==id);if(f)S.tomb=[...(S.tomb||[]),f.id].slice(-1000);S.fixed=S.fixed.filter(x=>x.id!=id);save();render()}
 function setCatB(ci,v){const b=pn(v);if(b>0)S.catB[ci]=b;else delete S.catB[ci];save();render()}
 
 /* ---------- ações: objetivos ---------- */
 function addGoal(){const n=$('gn').value.trim(),t=pn($('gt').value);if(!n||t<=0){toast('Preenche o nome e a meta');return}S.goals.push({id:Date.now(),n,t,s:0});save();render()}
 function dep(id){const a=pn($('d'+id).value);if(a<=0)return;const g=S.goals.find(g=>g.id==id);g.s=Math.min(g.t,g.s+a);save();render();toast(g.s>=g.t?'🎉 Objetivo alcançado!':'Depositaste '+eur(a))}
-function delGoal(id){const g=S.goals.find(x=>x.id==id);S.goals=S.goals.filter(x=>x.id!=id);save();render();toast('Objetivo apagado',()=>{S.goals.push(g);save();render()})}
+function delGoal(id){const g=S.goals.find(x=>x.id==id);if(g)S.tomb=[...(S.tomb||[]),g.id].slice(-1000);S.goals=S.goals.filter(x=>x.id!=id);save();render();toast('Objetivo apagado',()=>{S.goals.push(g);S.tomb=(S.tomb||[]).filter(t=>t!=g.id);save();render()})}
 
 /* ---------- backup / export / import ---------- */
 function copyTextSafe(txt){
@@ -1028,8 +1028,6 @@ function copyTextSafe(txt){
     document.execCommand('copy');ta.remove();
   }catch(e){}
 }
-function bkUp(){const payload={v:5,role:ROLE,exported:todayISO(),data:S};const t=$('bk');if(t){t.value=JSON.stringify(payload);t.select()}copyTextSafe(JSON.stringify(payload));toast('Cópia criada e copiada.')}
-function bkRe(){try{const p=JSON.parse($('bk').value);const d=p.data||p;S=Object.assign(emptyState(),{ob:1,onboarded:true},d);save();render();toast('Dados restaurados')}catch(e){toast('Texto inválido')}}
 function impFile(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{impText(String(r.result),f.name)}catch(e){toast('Erro: '+((e&&e.message)||'ficheiro inválido'))}inp.value=''};r.readAsText(f)}
 function impText(txt,name){
   txt=txt.replace(/^\uFEFF/,'');
@@ -1073,7 +1071,6 @@ function wipe(){
 function doWipe(){
   GS.del(K);
   ['poupar-v4','poupar-v3','poupar-v2','poupar-v1'].forEach(k=>GS.del(k));
-  if(SHDOC){try{SHDOC.delete()}catch(e){}}
   S=emptyState();step=1;tab='hoje';save();$('dlg').close();
   GS.del('poupar-role');GS.sDel('poupar-tmp');
   ROLE='';render();
@@ -1262,50 +1259,6 @@ function gastos(c){
   </div>`;
 }
 
-function obj(c){
-  const totalSaved=S.goals.reduce((s,g)=>s+g.s,0);
-  const completed=S.goals.filter(g=>g.s>=g.t).length;
-  return `<h1>Objetivos</h1>
-
-  ${totalSaved>0?`<div class="card" style="background:linear-gradient(135deg,var(--acc) 0%,var(--acc-d) 100%);color:#fff;border:0">
-    <div class="row">
-      <div>
-        <div style="font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:0.05em">Total poupado</div>
-        <div class="big">${eur(totalSaved,0)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:0.05em">Concluídos</div>
-        <div style="font-size:28px;font-weight:700">${completed}/${S.goals.length}</div>
-      </div>
-    </div>
-  </div>`:''}
-
-  ${S.goals.map(g=>{const p=Math.min(100,g.s/g.t*100),m=S.goal>0&&g.s<g.t?Math.ceil((g.t-g.s)/S.goal):0;
-    return `<div class="card">
-      <div class="row">
-        <b style="font-size:16px">${esc(g.n)}</b>
-        <button class="x" onclick="delGoal(${g.id})">🗑️</button>
-      </div>
-      <div class="row" style="margin-top:4px">
-        <span class="big" style="font-size:24px">${eur(g.s,0)}</span>
-        <span class="mut">de ${eur(g.t,0)} ·${Math.round(p)}%</span>
-      </div>
-      <div class="bar" style="margin:8px 0"><i style="width:${p}%"></i></div>
-      ${m?`<div class="mut">🗓️ Cerca de ${m} ${m>1?'meses':'mês'} ao ritmo atual</div>`:g.s>=g.t?'<div class="mut" style="color:var(--acc);font-weight:600">🎉 Objetivo alcançado!</div>':''}
-      <div class="row" style="margin-top:8px">
-        <input id="d${g.id}" type="text" inputmode="decimal" placeholder="Valor (€)" style="flex:1">
-        <button class="btn sm" onclick="dep(${g.id})">Depositar</button>
-      </div>
-    </div>`}).join('')||'<div class="card"><div class="empty"><div class="ic">🎯</div><div class="t">Sem objetivos ainda</div><div class="d">Cria o primeiro objetivo para começar a poupar com propósito</div></div></div>'}
-
-  <div class="card">
-    <h2>Novo objetivo</h2>
-    <input id="gn" placeholder="Ex.: Fundo de emergência">
-    <input id="gt" type="text" inputmode="decimal" placeholder="Meta (€)">
-    <button class="btn" onclick="addGoal()" style="width:100%">Criar objetivo</button>
-  </div>`;
-}
-
 function plano(c){
   const pct=S.inc>0?Math.round(S.goal/S.inc*100):0;
   const fixedPct=S.inc>0?Math.round(c.fixed/S.inc*100):0;
@@ -1327,7 +1280,7 @@ function plano(c){
     </div>
     ${pct>0?`<div class="insight ${pct>=20?'':pct>=10?'warn':'danger'}" style="margin-top:8px">
       <div class="ic">${pct>=20?'🏆':pct>=10?'👍':'💪'}</div>
-      <div class="tx">Estás a poupar <b>${pct}\%</b> do rendimento.${pct>=20?'Excelente ritmo!':pct>=10?'Bom começo, tenta subir para 20%.':'O ideal é poupar pelo menos 10-20%.'}</div>
+      <div class="tx">Estás a poupar <b>${pct}%</b> do rendimento.${pct>=20?'Excelente ritmo!':pct>=10?'Bom começo, tenta subir para 20%.':'O ideal é poupar pelo menos 10-20%.'}</div>
     </div>`:''}
   </div>
 
@@ -1365,7 +1318,7 @@ function plano(c){
     ${CATS.map((x,i)=>`<div class="row" style="padding:10px 0;border-bottom:1px solid var(--line)">
       <span style="font-size:22px;width:36px;text-align:center">${x[0]}</span>
       <div class="n" style="font-size:14px;font-weight:500">${x[1]}</div>
-      <input style="width:90px;text-align:right;font-size:14px;padding:8px 12px" type="text" inputmode="decimal" placeholder="€" value="${S.catB[i]\vert{}\vert{}''}" onchange="setCatB(${i},this.value)">
+      <input style="width:90px;text-align:right;font-size:14px;padding:8px 12px" type="text" inputmode="decimal" placeholder="€" value="${S.catB[i]||''}" onchange="setCatB(${i},this.value)">
     </div>`).join('')}
   </div>
 
@@ -1400,7 +1353,6 @@ function plano(c){
 }
 
 /* ---------- Casal: resumo partilhado + comparação ---------- */
-const PCOL=['#059669','#7c3aed','#2563eb','#d97706'];
 function summaryForState(st){
   const c=calcFor(st),cs=CATS.map((x,i)=>sum(c.m.filter(e=>e.c===i)));
   return{mk:mkey(0),inc:st.inc,fixed:c.fixed,goal:st.goal,budget:c.budget,spent:c.spent,dayN:c.dayN,dim:c.dim,cats:cs,
@@ -1409,87 +1361,28 @@ function summaryForState(st){
 }
 function mySummary(){return summaryForState(S)}
 
-function shareSave(){
-  if(!SHDOC||!S.share)return;
-  clearTimeout(shT);
-  shT=setTimeout(async()=>{if(!S.share)return;try{await SHDOC.set(mySummary());if(shErr){shErr=false;if(tab==='casal')render()}}catch(e){shErr=true;if(tab==='casal')render()}},800);
+/* Fusão multi-dispositivo: em vez de last-write-wins no documento inteiro,
+   une itens por id. Assim um gasto registado offline noutro telemóvel não
+   desaparece quando este sincroniza. Apagados ficam em "tomb" para não renascer. */
+function mergeArr(a,b,fn){
+  const m=new Map((a||[]).map(x=>[x.id,x]));
+  (b||[]).forEach(y=>{m.set(y.id,(m.has(y.id)&&fn)?fn(m.get(y.id),y):y)});
+  return [...m.values()];
 }
-async function toggleShare(){
-  S.share=!S.share;save();
-  if(!S.share&&SHDOC){try{await SHDOC.delete()}catch(e){}}
-  render();
+function mergeRemoteState(R){
+  const L=S;
+  const tomb=[...new Set([...(L.tomb||[]),...(R.tomb||[])])].slice(-1000);
+  const ex=mergeArr(L.ex,R.ex).filter(e=>!tomb.includes(e.id));
+  const fixed=mergeArr(L.fixed,R.fixed);
+  const goals=mergeArr(L.goals,R.goals,(a,b)=>({...b,s:Math.max(a.s||0,b.s||0)}));
+  const changed=JSON.stringify([L.ex,L.fixed,L.goals])!==JSON.stringify([ex,fixed,goals]);
+  const savedAt=Math.max(L.savedAt||0,R.savedAt||0),quick=L.quickAmt;
+  Object.assign(L,R);
+  L.ex=ex;L.fixed=fixed;L.goals=goals;L.tomb=tomb;L.savedAt=savedAt;L.quickAmt=quick;
+  return changed;
 }
+
 const who=id=>({nuno:'Nuno',anelise:'Anelise'}[id]||id);
-
-function exportPartnerSync(){
-  const payload=JSON.stringify({role:ROLE,sum:mySummary(),data:S});
-  const inp=$('syncp');if(inp){inp.value=payload;inp.select()}
-  copyTextSafe(payload);
-  toast('Resumo de '+who(ROLE)+' copiado! Envia para o outro telemóvel.');
-}
-function importPartnerSync(){
-  const inp=$('syncp');if(!inp||!inp.value.trim()){toast('Cola primeiro o código');return}
-  try{
-    const p=JSON.parse(inp.value.trim());
-    if(p.role&&['nuno','anelise'].includes(p.role)){
-      if(p.data)GS.set('poupar-v5-'+p.role,JSON.stringify(p.data));
-      if(p.sum)PEERS[p.role]=p.sum;
-      syncLocalPeers();
-      inp.value='';render();
-      toast('Dados de '+who(p.role)+' sincronizados!');
-    }else toast('Código inválido');
-  }catch(e){toast('Código inválido')}
-}
-
-function casal(c){
-  syncLocalPeers();
-  const num=v=>Number.isFinite(+v)?+v:0;
-  const head=`<div class="apphead"><h1>Casal</h1><button class="pill" onclick="goRole('tv')">📺 Modo TV</button></div>`;
-  const syncCard=`<div class="card">
-    <h2>Sincronizar resumo entre telemóveis</h2>
-    <div class="mut" style="font-size:12px">Partilhas apenas os totais do mês (sem movimentos privados) para o Painel da Casa comparar os dois.</div>
-    <div class="row" style="gap:8px">
-      <button class="btn sm alt" onclick="exportPartnerSync()" style="flex:1">📤 Copiar resumo de ${who(ROLE)}</button>
-    </div>
-    <div class="row" style="gap:8px">
-      <input id="syncp" placeholder="Cola aqui o resumo da outra pessoa..." style="flex:1;font-size:13px;padding:10px 12px">
-      <button class="btn sm" onclick="importPartnerSync()">Importar</button>
-    </div>
-  </div>`;
-
-  const ids=Object.keys(PEERS).sort((a,b)=>(b===ROLE)-(a===ROLE)||(a<b?-1:1));
-  const P=ids.map((id,i)=>{const p=PEERS[id]||{};return{id,col:PCOL[id==='nuno'?0:1],n:who(id),inc:num(p.inc),goal:num(p.goal),budget:num(p.budget),spent:num(p.spent),dayN:Math.max(1,num(p.dayN)),
-    cats:CATS.map((_,k)=>num(Array.isArray(p.cats)?p.cats[k]:0)),hist:[0,1,2,3,4,5].map(k=>num(Array.isArray(p.hist)?p.hist[k]:0)),
-    streak:num(p.streak),saved:num(p.saved),upd:num(p.upd),old:!!p.mk&&String(p.mk)!==mkey(0)}});
-  if(P.length<2){
-    return head+`<div class="card"><div class="empty"><div class="ic">⏳</div><div class="t">À espera da outra pessoa</div><div class="d">Configura o perfil de ${ROLE==='nuno'?'Anelise':'Nuno'} ou importa o código abaixo para veres a comparação completa.</div></div></div>`+syncCard;
-  }
-  const dot=p=>`<span class="who"><i class="pdot" style="background:${p.col}"></i>${esc(p.n)}</span>`;
-  const metric=(title,fn,fmt,cap)=>{const vs=P.map(fn),mx=cap||Math.max(1,...vs);
-    return `<div class="card"><h2>${title}</h2>${P.map((p,i)=>`<div class="mrow">${dot(p)}<div class="bar"><i style="width:${Math.min(100,Math.max(0,vs[i])/mx*100)}\%;background:${p.col}"></i></div><b class="num" style="font-size:13px">${fmt(vs[i])}</b></div>`).join('')}</div>`};
-  const tot=f=>P.reduce((s,p)=>s+f(p),0);
-  const together=`<div class="hero" style="flex-direction:column;align-items:stretch;gap:14px">
-    <div class="hero-content"><div style="font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:.05em">Juntos este mês</div><div class="big num" style="margin-top:4px">${eur(tot(p=>p.spent),0)}</div><div style="font-size:12px;opacity:.8">gastos de ${P.map(p=>esc(p.n)).join(' + ')}</div></div>
-    <div class="hero-stats" style="flex-direction:row;gap:10px;position:relative;z-index:1">
-      <div class="glass" style="flex:1"><div style="font-size:11px;opacity:.8">Ainda livre</div><b>${eur(tot(p=>p.budget-p.spent),0)}</b></div>
-      <div class="glass" style="flex:1"><div style="font-size:11px;opacity:.8">Meta/mês</div><b>${eur(tot(p=>p.goal),0)}</b></div>
-      <div class="glass" style="flex:1"><div style="font-size:11px;opacity:.8">Em objetivos</div><b>${eur(tot(p=>p.saved),0)}</b></div>
-    </div></div>`;
-  const people=`<div class="card"><h2>Quem está a comparar</h2>${P.map(p=>`<div class="row">${dot(p)}<span class="mut" style="font-size:11px">${p.old?'<span class="chip warn">dados de outro mês</span> ':''}atualizado ${p.upd?new Date(p.upd).toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit'}):'—'}</span></div>`).join('')}</div>`;
-  const catRows=CATS.map((x,k)=>{const vs=P.map(p=>p.cats[k]),mx=Math.max(...vs);if(mx<=0)return'';
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px"><div style="font-weight:600;font-size:14px">${x[0]} ${x[1]}</div>${P.map((p,i)=>`<div class="mrow">${dot(p)}<div class="bar"><i style="width:${vs[i]/mx*100}\%;background:${p.col}"></i></div><span class="num" style="font-size:12px">${eur(vs[i],0)} <small class="mut">${p.spent>0?Math.round(vs[i]/p.spent*100):0}%</small></span></div>`).join('')}</div>`}).join('');
-  const hmx=Math.max(1,...P.flatMap(p=>p.hist));
-  const hist=`<div class="card"><h2>Últimos 6 meses</h2><div class="row" style="justify-content:flex-start;gap:14px;flex-wrap:wrap">${P.map(dot).join('')}</div>
-    <div class="hist">${[-5,-4,-3,-2,-1,0].map((o,k)=>`<div><div class="bs">${P.map(p=>`<i title="${eur(p.hist[k],0)}" style="height:${Math.max(2,p.hist[k]/hmx*80)}px;background:${p.col}"></i>`).join('')}</div>${mdate(o).toLocaleDateString('pt-PT',{month:'short'})}</div>`).join('')}</div></div>`;
-  return head+together+people
-    +metric('Gasto este mês',p=>p.spent,v=>eur(v,0))
-    +metric('Do orçamento usado',p=>p.budget>0?p.spent/p.budget*100:0,v=>Math.round(v)+'%',100)
-    +metric('Média por dia',p=>p.spent/p.dayN,v=>eur(v))
-    +metric('Taxa de poupança planeada',p=>p.inc>0?p.goal/p.inc*100:0,v=>Math.round(v)+'%')
-    +metric('Poupado em objetivos',p=>p.saved,v=>eur(v,0))
-    +metric('🔥 Dias seguidos dentro do limite',p=>p.streak,v=>v+' d')
-    +`<div class="card"><h2>Por categoria</h2>${catRows||'<div class="mut">Sem gastos este mês.</div>'}</div>`+hist+syncCard;
-}
 
 let tvNote='',tvT=null;
 let tvHi='',tvErr=false,tvS=0;
@@ -1553,7 +1446,7 @@ async function pinLoad(){let d={};try{d=JSON.parse(GS.get('poupar-pins')||'{}')}
 async function pinSave(role,pin){await pinLoad();PINS=Object.assign({},PINS,{[role]:await pinHash(pin,role)});
   GS.set('poupar-pins',JSON.stringify(PINS));
   try{const r=await pinDoc();if(r)await r.set(PINS)}catch(e){}}
-async function chgPin(){const v=(($('np')\vert{}\vert{}{}).value\vert{}\vert{}'').trim();if(!/^\d{4}$/.test(v)){toast('O PIN tem 4 dígitos');return}await pinSave(ROLE,v);$('np').value='';toast('PIN guardado')}
+async function chgPin(){const v=(($('np')||{}).value||'').trim();if(!/^\d{4}$/.test(v)){toast('O PIN tem 4 dígitos');return}await pinSave(ROLE,v);$('np').value='';toast('PIN guardado')}
 function pinKey(k){if(k==='<')pinV=pinV.slice(0,-1);else if(pinV.length<4)pinV+=k;pinMsg='';if(pinV.length===4){const v=pinV;pinV='';pinDone(v)}else render()}
 async function pinDone(v){
   if(pinM==='enter'){for(const r of['nuno','anelise']){if(PINS[r]&&PINS[r]===await pinHash(v,r)){goRole(r);return}}pinMsg='PIN errado. Tenta outra vez.';render()}
@@ -1580,7 +1473,7 @@ function render(){
   else document.documentElement.dataset.theme='light';
   const c=calc();
   $('nav').style.display=S.ob?'flex':'none';
-  $('v').innerHTML=(S.ob?({hoje,gastos,obj,casal,plano})[tab](c):onb());
+  $('v').innerHTML=(S.ob?({hoje,gastos,plano})[tab](c):onb());
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
 }
 $('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(b)go(b.dataset.t)});
