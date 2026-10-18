@@ -11,7 +11,6 @@
 <link rel="icon" id="ic" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230b1f1a'/><rect x='14' y='24' width='72' height='52' rx='8' stroke='%23d4af37' stroke-width='5' fill='none'/><text x='50' y='62' font-size='36' font-weight='bold' text-anchor='middle' fill='%23d4af37'>€</text></svg>">
 
 <style>
-
 /* ============================================
    DESIGN SYSTEM - Minimalista Profissional
    ============================================ */
@@ -858,26 +857,26 @@ async function cloudNow(){
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){clearTimeout(cloudT);cloudNow()}});
 addEventListener('pagehide',()=>{clearTimeout(cloudT);cloudNow()});
 addEventListener('online',()=>{if(CLOUD){cloudDirty=true;cloudNow()}});
-/* ---------- Nuvem (Firebase ou Claude), ligada sempre que o perfil muda ---------- */
-let cloudOn=false,SUBS=null,CLOUD_ROLE='';
-async function getDb(){try{
-  if(window.claude){const db=await window.claude.use('db');return db||null}
-  if(window.firebase&&window.FIREBASE_CONFIG&&!/COLA_AQUI/.test(JSON.stringify(window.FIREBASE_CONFIG))){if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);return firebase.firestore()}
-}catch(e){}return null}
-let cloudOn=false,SUBS=[],CLOUD_ROLE='';
+
+/* ---------- Nuvem (Firebase ou Claude), ligada sempre em tempo real ---------- */
+let cloudOn=false,SUBS=[],CLOUD_ROLE=null;
 async function getDb(){try{
   if(window.claude){const db=await window.claude.use('db');return db||null}
   if(window.firebase&&window.FIREBASE_CONFIG&&!/COLA_AQUI/.test(JSON.stringify(window.FIREBASE_CONFIG))){if(!firebase.apps.length)firebase.initializeApp(window.FIREBASE_CONFIG);return firebase.firestore()}
 }catch(e){}return null}
 
 async function initCloud(){
-  if(!ROLE||CLOUD_ROLE===ROLE)return;
-  CLOUD_ROLE=ROLE;
+  const targetRole=ROLE||'tv';
+  if(CLOUD_ROLE===targetRole&&cloudOn)return;
+  CLOUD_ROLE=targetRole;
   try{if(Array.isArray(SUBS))SUBS.forEach(u=>u&&u());else if(SUBS)SUBS()}catch(e){}
   SUBS=[];CLOUD=null;cloudOn=false;
-  const db=await getDb();if(!db||CLOUD_ROLE!==ROLE)return;
-  const ref=db.doc('poupar/'+ROLE);
-  CLOUD=ref;ME=ROLE;SH=db.collection('poupar');
+  const db=await getDb();if(!db||CLOUD_ROLE!==targetRole)return;
+  if(ROLE&&ROLE!=='tv'){
+    CLOUD=db.doc('poupar/'+ROLE);
+    ME=ROLE;
+  }
+  SH=db.collection('poupar');
 
   // Escuta individualmente os documentos permitidos pelas regras do Firebase ('nuno' e 'anelise')
   ['nuno','anelise'].forEach(id=>{
@@ -886,23 +885,29 @@ async function initCloud(){
       const old=(PEERS[id]&&PEERS[id].recent)?PEERS[id].recent[0]:null;
       if(d.exists){
         const data=d.data()||{};
-        if(data.sum)PEERS[id]=data.sum;
+        let remoteState=null;
+        if(data.json){
+          try{remoteState=JSON.parse(data.json)}catch(e){}
+        }
+        // Calcula sempre o resumo mais fresco a partir dos dados completos ou usa o sum guardado
+        if(remoteState){
+          PEERS[id]=summaryForState(Object.assign(emptyState(),remoteState));
+          GS.set('poupar-v5-'+id,data.json);
+        }else if(data.sum){
+          PEERS[id]=data.sum;
+        }
         // Se este aparelho estiver com o perfil da própria pessoa, atualiza também os gastos em tempo real
-        if(id===ROLE&&ROLE!=='tv'&&data.json&&!cloudDirty){
-          try{
-            const r=JSON.parse(data.json);
-            if((r.savedAt||0)>(S.savedAt||0)){
-              Object.assign(S,r);
-              GS.set(K,JSON.stringify(S));
-              if(S.theme)document.documentElement.dataset.theme=S.theme;
-              render();
-            }
-          }catch(e){}
+        if(id===ROLE&&ROLE!=='tv'&&remoteState&&!cloudDirty){
+          if((remoteState.savedAt||0)>(S.savedAt||0)){
+            Object.assign(S,remoteState);
+            GS.set(K,JSON.stringify(S));
+            if(S.theme)document.documentElement.dataset.theme=S.theme;
+          }
         }
       }
       if(ROLE&&ROLE!=='tv')PEERS[ROLE]=mySummary();
       syncLocalPeers();
-      if(ROLE==='tv'){
+      if(ROLE==='tv'||!ROLE){
         const b=((PEERS[id]||{}).recent||[])[0];
         if(old&&b&&b.id!==old.id){
           tvHi=id;
@@ -911,7 +916,7 @@ async function initCloud(){
           tvT=setTimeout(()=>{tvNote='';tvHi='';render()},10000);
         }
       }
-      if(tab==='casal'||ROLE==='tv')render();
+      render();
       if(!cloudDirty)pill('☁️ Ligado','#0f9d6b');
     },err=>{
       console.error('Erro Firebase:',err);
@@ -920,9 +925,8 @@ async function initCloud(){
     SUBS.push(u);
   });
 
-  if(ROLE!=='tv'&&(S.ob||S.ex.length)){S.savedAt=S.savedAt||Date.now();cloudSave()}
+  if(ROLE&&ROLE!=='tv'&&(S.ob||S.ex.length)){S.savedAt=S.savedAt||Date.now();cloudSave()}
   syncState='cloud';render();
-}
 }
 
 /* ---------- utils ---------- */
@@ -1135,7 +1139,7 @@ function hoje(c){
         <div class="glass"><div style="font-size:11px;opacity:.8">Limite fixo diário</div><b>${eurS(Math.max(0,c.base))}</b></div>
         <div class="glass"><div style="font-size:11px;opacity:.8">Limite de hoje</div><b>${eurS(Math.max(0,c.allow))}</b></div>
         <div class="glass"><div style="font-size:11px;opacity:.8">Faltam</div><b>${c.left} dias</b></div>
-        ${st?`<div class="glass" style="background:rgba(251,191,36,.2);border-color:rgba(251,191,36,.3)"><div style="font-size:11px;opacity:.8">🔥 Streak</div><b>${st} ${st>1?'dias':'dia'}</b></div>`:''}
+        ${st?`<div class="glass" style="background:rgba(251,191,36,.2);border-color:rgba(251,191,36,.3)"><div style="font-size:11px;opacity:.8">🔥 Streak</div><b>${st}${st>1?'dias':'dia'}</b></div>`:''}
       </div>
     </div>
 
@@ -1284,7 +1288,7 @@ function obj(c){
       </div>
       <div class="row" style="margin-top:4px">
         <span class="big" style="font-size:24px">${eur(g.s,0)}</span>
-        <span class="mut">de ${eur(g.t,0)} · ${Math.round(p)}%</span>
+        <span class="mut">de ${eur(g.t,0)} ·${Math.round(p)}%</span>
       </div>
       <div class="bar" style="margin:8px 0"><i style="width:${p}%"></i></div>
       ${m?`<div class="mut">🗓️ Cerca de ${m} ${m>1?'meses':'mês'} ao ritmo atual</div>`:g.s>=g.t?'<div class="mut" style="color:var(--acc);font-weight:600">🎉 Objetivo alcançado!</div>':''}
@@ -1323,7 +1327,7 @@ function plano(c){
     </div>
     ${pct>0?`<div class="insight ${pct>=20?'':pct>=10?'warn':'danger'}" style="margin-top:8px">
       <div class="ic">${pct>=20?'🏆':pct>=10?'👍':'💪'}</div>
-      <div class="tx">Estás a poupar <b>${pct}%</b> do rendimento. ${pct>=20?'Excelente ritmo!':pct>=10?'Bom começo, tenta subir para 20%.':'O ideal é poupar pelo menos 10-20%.'}</div>
+      <div class="tx">Estás a poupar <b>${pct}\%</b> do rendimento.${pct>=20?'Excelente ritmo!':pct>=10?'Bom começo, tenta subir para 20%.':'O ideal é poupar pelo menos 10-20%.'}</div>
     </div>`:''}
   </div>
 
@@ -1361,7 +1365,7 @@ function plano(c){
     ${CATS.map((x,i)=>`<div class="row" style="padding:10px 0;border-bottom:1px solid var(--line)">
       <span style="font-size:22px;width:36px;text-align:center">${x[0]}</span>
       <div class="n" style="font-size:14px;font-weight:500">${x[1]}</div>
-      <input style="width:90px;text-align:right;font-size:14px;padding:8px 12px" type="text" inputmode="decimal" placeholder="€" value="${S.catB[i]||''}" onchange="setCatB(${i},this.value)">
+      <input style="width:90px;text-align:right;font-size:14px;padding:8px 12px" type="text" inputmode="decimal" placeholder="€" value="${S.catB[i]\vert{}\vert{}''}" onchange="setCatB(${i},this.value)">
     </div>`).join('')}
   </div>
 
@@ -1462,7 +1466,7 @@ function casal(c){
   }
   const dot=p=>`<span class="who"><i class="pdot" style="background:${p.col}"></i>${esc(p.n)}</span>`;
   const metric=(title,fn,fmt,cap)=>{const vs=P.map(fn),mx=cap||Math.max(1,...vs);
-    return `<div class="card"><h2>${title}</h2>${P.map((p,i)=>`<div class="mrow">${dot(p)}<div class="bar"><i style="width:${Math.min(100,Math.max(0,vs[i])/mx*100)}%;background:${p.col}"></i></div><b class="num" style="font-size:13px">${fmt(vs[i])}</b></div>`).join('')}</div>`};
+    return `<div class="card"><h2>${title}</h2>${P.map((p,i)=>`<div class="mrow">${dot(p)}<div class="bar"><i style="width:${Math.min(100,Math.max(0,vs[i])/mx*100)}\%;background:${p.col}"></i></div><b class="num" style="font-size:13px">${fmt(vs[i])}</b></div>`).join('')}</div>`};
   const tot=f=>P.reduce((s,p)=>s+f(p),0);
   const together=`<div class="hero" style="flex-direction:column;align-items:stretch;gap:14px">
     <div class="hero-content"><div style="font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:.05em">Juntos este mês</div><div class="big num" style="margin-top:4px">${eur(tot(p=>p.spent),0)}</div><div style="font-size:12px;opacity:.8">gastos de ${P.map(p=>esc(p.n)).join(' + ')}</div></div>
@@ -1473,7 +1477,7 @@ function casal(c){
     </div></div>`;
   const people=`<div class="card"><h2>Quem está a comparar</h2>${P.map(p=>`<div class="row">${dot(p)}<span class="mut" style="font-size:11px">${p.old?'<span class="chip warn">dados de outro mês</span> ':''}atualizado ${p.upd?new Date(p.upd).toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit'}):'—'}</span></div>`).join('')}</div>`;
   const catRows=CATS.map((x,k)=>{const vs=P.map(p=>p.cats[k]),mx=Math.max(...vs);if(mx<=0)return'';
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px"><div style="font-weight:600;font-size:14px">${x[0]} ${x[1]}</div>${P.map((p,i)=>`<div class="mrow">${dot(p)}<div class="bar"><i style="width:${vs[i]/mx*100}%;background:${p.col}"></i></div><span class="num" style="font-size:12px">${eur(vs[i],0)} <small class="mut">${p.spent>0?Math.round(vs[i]/p.spent*100):0}%</small></span></div>`).join('')}</div>`}).join('');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px"><div style="font-weight:600;font-size:14px">${x[0]} ${x[1]}</div>${P.map((p,i)=>`<div class="mrow">${dot(p)}<div class="bar"><i style="width:${vs[i]/mx*100}\%;background:${p.col}"></i></div><span class="num" style="font-size:12px">${eur(vs[i],0)} <small class="mut">${p.spent>0?Math.round(vs[i]/p.spent*100):0}%</small></span></div>`).join('')}</div>`}).join('');
   const hmx=Math.max(1,...P.flatMap(p=>p.hist));
   const hist=`<div class="card"><h2>Últimos 6 meses</h2><div class="row" style="justify-content:flex-start;gap:14px;flex-wrap:wrap">${P.map(dot).join('')}</div>
     <div class="hist">${[-5,-4,-3,-2,-1,0].map((o,k)=>`<div><div class="bs">${P.map(p=>`<i title="${eur(p.hist[k],0)}" style="height:${Math.max(2,p.hist[k]/hmx*80)}px;background:${p.col}"></i>`).join('')}</div>${mdate(o).toLocaleDateString('pt-PT',{month:'short'})}</div>`).join('')}</div></div>`;
@@ -1549,7 +1553,7 @@ async function pinLoad(){let d={};try{d=JSON.parse(GS.get('poupar-pins')||'{}')}
 async function pinSave(role,pin){await pinLoad();PINS=Object.assign({},PINS,{[role]:await pinHash(pin,role)});
   GS.set('poupar-pins',JSON.stringify(PINS));
   try{const r=await pinDoc();if(r)await r.set(PINS)}catch(e){}}
-async function chgPin(){const v=(($('np')||{}).value||'').trim();if(!/^\d{4}$/.test(v)){toast('O PIN tem 4 dígitos');return}await pinSave(ROLE,v);$('np').value='';toast('PIN guardado')}
+async function chgPin(){const v=(($('np')\vert{}\vert{}{}).value\vert{}\vert{}'').trim();if(!/^\d{4}$/.test(v)){toast('O PIN tem 4 dígitos');return}await pinSave(ROLE,v);$('np').value='';toast('PIN guardado')}
 function pinKey(k){if(k==='<')pinV=pinV.slice(0,-1);else if(pinV.length<4)pinV+=k;pinMsg='';if(pinV.length===4){const v=pinV;pinV='';pinDone(v)}else render()}
 async function pinDone(v){
   if(pinM==='enter'){for(const r of['nuno','anelise']){if(PINS[r]&&PINS[r]===await pinHash(v,r)){goRole(r);return}}pinMsg='PIN errado. Tenta outra vez.';render()}
@@ -1571,8 +1575,7 @@ function chooser(){
 
 function render(){
   if(!ROLE){$('nav').style.display='none';$('v').className='';$('v').innerHTML=chooser();return}
-  if(ROLE==='tv'){document.documentElement.dataset.theme='dark';$('nav').style.display='none';$('v').className='tv';$('v').innerHTML=tvView3();tick();return}
-  $('v').className='';
+  if(ROLE==='tv'){document.documentElement.dataset.theme='dark';$('nav').style.display='none';$('v').className='tv';$('v').innerHTML=tvView3();tick();return}$('v').className='';
   if(S.theme)document.documentElement.dataset.theme=S.theme;
   else document.documentElement.dataset.theme='light';
   const c=calc();
